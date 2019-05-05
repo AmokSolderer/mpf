@@ -182,13 +182,16 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
             self.config = self.machine.config_validator.validate_config("lisy", self.machine.config['lisy'])
 
             self.configure_logging("lisy", self.config['console_log'], self.config['file_log'])
+            self.debug = self.config["debug"]
 
             yield from super().initialize()
 
-            if self.config['connection'] == "serial":
+            if self.config['connection'] == ("serial", "serial_with_reset"):
                 self.log.info("Connecting to %s at %sbps", self.config['port'], self.config['baud'])
                 connector = self.machine.clock.open_serial_connection(
                     url=self.config['port'], baudrate=self.config['baud'], limit=0)
+                if self.config['connection'] == "serial_with_reset":
+                    yield from asyncio.sleep(.2, loop=self.machine.clock.loop)
             else:
                 self.log.info("Connecting to %s:%s", self.config['network_host'], self.config['network_port'])
                 connector = self.machine.clock.open_connection(self.config['network_host'], self.config['network_port'])
@@ -197,16 +200,18 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
 
             # reset platform
             self.debug_log("Sending reset.")
-            self.send_byte(LisyDefines.GeneralReset)
-            return_code = yield from self.read_byte()
-            if return_code != 0:
-                raise AssertionError("Reset of LISY failed. Got {} instead of 0".format(return_code))
+            #self.send_byte(LisyDefines.GeneralReset)
+            #return_code = yield from self.read_byte()
+            #if return_code != 0:
+            #    raise AssertionError("Reset of LISY failed. Got {} instead of 0".format(return_code))
 
             # get type (system 1 vs system 80)
             self.send_byte(LisyDefines.InfoGetConnectedLisyHardware)
             type_str = yield from self.read_string()
 
-            if type_str == b'LISY1':
+            if type_str == b'APC':
+                self._system_type = 1
+            elif type_str == b'LISY1':
                 self._system_type = 1
             elif type_str == b'LISY35':
                 self._system_type = 35
@@ -215,10 +220,12 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
             else:
                 raise AssertionError("Invalid LISY hardware version {}".format(type_str))
 
-            self.send_byte(LisyDefines.InfoLisyVersion)
-            lisy_version = yield from self.read_string()
-            self.send_byte(LisyDefines.InfoGetApiVersion)
-            api_version = yield from self.read_string()
+            #self.send_byte(LisyDefines.InfoLisyVersion)
+            #lisy_version = yield from self.read_string()
+            lisy_version = 1
+            #self.send_byte(LisyDefines.InfoGetApiVersion)
+            #api_version = yield from self.read_string()
+            api_version = 2
 
             self.debug_log("Connected to %s hardware. LISY version: %s. API version: %s.",
                            type_str, lisy_version, api_version)
@@ -248,8 +255,8 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
             self._number_of_solenoids = yield from self.read_byte()
 
             # get number of displays
-            self.send_byte(LisyDefines.InfoGetNumberOfDisplays)
-            self._number_of_displays = yield from self.read_byte()
+            #self.send_byte(LisyDefines.InfoGetNumberOfDisplays)
+            self._number_of_displays = 0 #yield from self.read_byte()
 
             self.debug_log("Number of lamps: %s. Number of coils: %s. Numbers of display: %s",
                            self._number_of_lamps, self._number_of_solenoids, self._number_of_displays)
@@ -261,7 +268,9 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
                     number = row * 10 + col
                     self.send_byte(LisyDefines.SwitchesGetStatusOfSwitch, bytes([number]))
                     state = yield from self.read_byte()
-                    if state > 1:
+                    if state == 2:
+                        self.debug_log("Switch %s does not exist", number)
+                    elif state > 2:
                         raise AssertionError("Invalid switch {}. Got response: {}".format(number, state))
 
                     self._inputs[str(number)] = state == 1
@@ -328,10 +337,11 @@ class LisyHardwarePlatform(SwitchPlatform, LightsPlatform, DriverPlatform,
         while True:
             # send watchdog
             with (yield from self._bus_lock):
-                self.send_byte(LisyDefines.GeneralWatchdog)
-                response = yield from self.read_byte()
-                if response != 0:
-                    self.warning_log("Watchdog returned %s instead 0", response)
+                #self.send_byte(LisyDefines.GeneralWatchdog)
+                #response = yield from self.read_byte()
+                #if response != 0:
+                #    self.warning_log("Watchdog returned %s instead 0", response)
+                pass
             # sleep 500ms
             yield from asyncio.sleep(.5, loop=self.machine.clock.loop)
 
